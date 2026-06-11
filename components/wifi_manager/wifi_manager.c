@@ -122,7 +122,7 @@ static esp_err_t root_get_handler(httpd_req_t *req)
     }
     
     httpd_resp_set_type(req, "text/html");
-    httpd_resp_send(req, setup_html, HTTPD_RESP_USE_SIZEOF);
+    httpd_resp_send(req, setup_html, HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
 
@@ -194,7 +194,7 @@ static esp_err_t save_get_handler(httpd_req_t *req)
         const char* success_resp = 
         "<html><head><style>body { background:#07060A; color:#E2E1E6; font-family:sans-serif; text-align:center; padding-top:100px; }</style></head>"
         "<body><h2>Configuration Saved Successfully!</h2><p>Rebooting Assistant device... Please connect to your WiFi network.</p></body></html>";
-        httpd_resp_send(req, success_resp, HTTPD_RESP_USE_SIZEOF);
+        httpd_resp_send(req, success_resp, HTTPD_RESP_USE_STRLEN);
 
         vTaskDelay(pdMS_TO_TICKS(1500));
         esp_restart();
