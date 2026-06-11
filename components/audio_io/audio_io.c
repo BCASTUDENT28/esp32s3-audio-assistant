@@ -33,7 +33,7 @@ esp_err_t audio_io_init(void)
     // ----------------------------------------------------
     // 1. Configure I2S RX Channel (Microphone) on I2S_NUM_1
     // ----------------------------------------------------
-    i2s_chan_config_t rx_chan_cfg = I2S_CHAN_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
+    i2s_chan_config_t rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
     esp_err_t err = i2s_new_channel(&rx_chan_cfg, NULL, &rx_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create I2S RX channel: %s", esp_err_to_name(err));
@@ -68,7 +68,7 @@ esp_err_t audio_io_init(void)
     // ----------------------------------------------------
     // 2. Configure I2S TX Channel (Speaker/DAC) on I2S_NUM_0
     // ----------------------------------------------------
-    i2s_chan_config_t tx_chan_cfg = I2S_CHAN_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     err = i2s_new_channel(&tx_chan_cfg, &tx_handle, NULL);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create I2S TX channel: %s", esp_err_to_name(err));
