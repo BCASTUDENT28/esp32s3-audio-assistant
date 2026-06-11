@@ -5,12 +5,13 @@
 
 #include "storage.h"
 #include "oled_display.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "MAIN";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 1 (Storage + OLED)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 2 (WiFi Onboarding)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
@@ -26,9 +27,19 @@ void app_main(void)
         return;
     }
 
-    // 3. Update Display state to Ready to show everything initialized successfully
+    // 3. Connect WiFi or start captive configuration portal
+    esp_err_t wifi_err = wifi_manager_init(true);
+    if (wifi_err != ESP_OK || !wifi_manager_is_connected()) {
+        ESP_LOGI(TAG, "WiFi Onboarding AP Portal active. Configure via http://192.168.4.1");
+        // Keep main thread running while AP captive portal is active
+        while (1) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
+
+    // 4. Update Display state to Ready when connected
     oled_set_state(OLED_STATE_READY);
-    ESP_LOGI(TAG, "JARVIS-S3 Phase 1 Initialization successful. Standby mode active.");
+    ESP_LOGI(TAG, "WiFi Connected successfully! Standby mode active.");
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
