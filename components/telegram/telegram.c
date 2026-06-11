@@ -25,7 +25,7 @@ struct HttpBuffer {
 // HTTP Client Event Handler
 static esp_err_t http_event_handler(esp_http_client_event_handle_t evt)
 {
-    struct HttpBuffer *buf = (struct HttpBuffer *)evt->user_ctx;
+    struct HttpBuffer *buf = (struct HttpBuffer *)evt->user_data;
     switch(evt->event_id) {
         case HTTP_EVENT_ON_DATA:
             if (buf && buf->data && (buf->index + evt->data_len < buf->limit)) {
@@ -85,21 +85,21 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
         storage_read_string("wifi_ssid", ssid, sizeof(ssid));
         
         snprintf(reply, sizeof(reply),
-                 "🤖 ESP32-S3 Voice Assistant Status:\n\n"
-                 "📶 WiFi Network: %s\n"
-                 "💾 Free Internal Heap: %d KB\n"
-                 "🧠 Free PSRAM: %d KB\n"
-                 "✅ System Status: ACTIVE",
-                 ssid, free_heap / 1024, free_psram / 1024);
+                 "[BOT] JARVIS-S3 Voice Assistant Status:\n\n"
+                 "WiFi Network: %s\n"
+                 "Free Internal Heap: %d KB\n"
+                 "Free PSRAM: %d KB\n"
+                 "System Status: ACTIVE",
+                 ssid, (int)(free_heap / 1024), (int)(free_psram / 1024));
         telegram_send_message(token, chat_id, reply);
     } 
     else if (strcmp(text, "/reboot") == 0) {
-        telegram_send_message(token, chat_id, "🔄 Rebooting device...");
+        telegram_send_message(token, chat_id, "Rebooting device...");
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_restart();
     } 
     else if (strcmp(text, "/clear") == 0) {
-        telegram_send_message(token, chat_id, "⚠️ Clearing all configuration from NVS and resetting to AP mode...");
+        telegram_send_message(token, chat_id, "Clearing all configuration from NVS and resetting to AP mode...");
         vTaskDelay(pdMS_TO_TICKS(1000));
         storage_clear_all();
         esp_restart();
@@ -107,13 +107,13 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
     else if (strncmp(text, "/ota ", 5) == 0) {
         const char *ota_url = text + 5;
         char reply[256];
-        snprintf(reply, sizeof(reply), "📥 Starting OTA firmware update from:\n%s", ota_url);
+        snprintf(reply, sizeof(reply), "Starting OTA firmware update from:\n%s", ota_url);
         telegram_send_message(token, chat_id, reply);
         
         esp_err_t err = ota_start(ota_url);
         if (err != ESP_OK) {
             char fail_reply[128];
-            snprintf(fail_reply, sizeof(fail_reply), "❌ OTA Update Failed: %s", esp_err_to_name(err));
+            snprintf(fail_reply, sizeof(fail_reply), "OTA Update Failed: %s", esp_err_to_name(err));
             telegram_send_message(token, chat_id, fail_reply);
         }
     } 
@@ -158,7 +158,7 @@ static void telegram_bot_task(void *pvParameters)
         }
 
         char url[256];
-        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=10", token, last_update_id);
+        snprintf(url, sizeof(url), "https://api.telegram.org/bot%s/getUpdates?offset=%d&timeout=10", token, (int)last_update_id);
 
         struct HttpBuffer http_buf = {
             .data = recv_buf,
@@ -170,7 +170,7 @@ static void telegram_bot_task(void *pvParameters)
             .url = url,
             .method = HTTP_METHOD_GET,
             .event_handler = http_event_handler,
-            .user_ctx = &http_buf,
+            .user_data = &http_buf,
             .crt_bundle_attach = esp_crt_bundle_attach,
             .timeout_ms = 15000,
         };

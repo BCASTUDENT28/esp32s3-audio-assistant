@@ -7,12 +7,13 @@
 #include "oled_display.h"
 #include "wifi_manager.h"
 #include "backend_client.h"
+#include "telegram.h"
 
 static const char *TAG = "MAIN";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 3 (DeepSeek API Integration)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 4 (Telegram Integration)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
@@ -41,25 +42,15 @@ void app_main(void)
     oled_set_state(OLED_STATE_READY);
     ESP_LOGI(TAG, "WiFi Connected successfully!");
 
-    // 5. Test DeepSeek HTTPS client
-    char reply_buf[256] = {0};
-    oled_set_custom_message("LLM QUERY", "Asking DeepSeek...");
-    oled_set_state(OLED_STATE_THINKING);
-
-    esp_err_t ds_err = backend_deepseek_chat(NULL, "Hello, answer in 5 words.", reply_buf, sizeof(reply_buf));
-    if (ds_err == ESP_OK) {
-        ESP_LOGI(TAG, "DeepSeek Reply: %s", reply_buf);
-        oled_set_custom_message("DEEPSEEK SUCCESS", reply_buf);
+    // 5. Start Telegram bot listener task
+    esp_err_t tg_err = telegram_init();
+    if (tg_err == ESP_OK) {
+        ESP_LOGI(TAG, "Telegram Bot client started successfully.");
     } else {
-        ESP_LOGE(TAG, "DeepSeek query failed.");
-        oled_set_custom_message("DEEPSEEK FAIL", "Query returned error");
-        oled_set_state(OLED_STATE_ERROR);
+        ESP_LOGE(TAG, "Failed to start Telegram Bot client.");
     }
 
-    // Hang here in standby loop after showing result
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    oled_set_state(OLED_STATE_READY);
-
+    // Standby loop
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
