@@ -28,7 +28,7 @@ struct HttpBuffer {
 // HTTP Event Handler
 static esp_err_t http_event_handler(esp_http_client_event_handle_t evt)
 {
-    struct HttpBuffer *buf = (struct HttpBuffer *)evt->user_ctx;
+    struct HttpBuffer *buf = (struct HttpBuffer *)evt->user_data;
     
     switch(evt->event_id) {
         case HTTP_EVENT_ERROR:
@@ -125,7 +125,7 @@ esp_err_t backend_speech_to_text(const char* api_key, char* out_text, size_t max
         .url = WHISPER_API_URL,
         .method = HTTP_METHOD_POST,
         .event_handler = http_event_handler,
-        .user_ctx = &http_buf,
+        .user_data = &http_buf,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
     };
@@ -260,7 +260,7 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
         .url = DEEPSEEK_API_URL,
         .method = HTTP_METHOD_POST,
         .event_handler = http_event_handler,
-        .user_ctx = &http_buf,
+        .user_data = &http_buf,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
     };
@@ -328,7 +328,7 @@ struct TtsFileContext {
 // TTS HTTP Event Handler to stream audio directly to SPIFFS without accumulating in RAM
 static esp_err_t tts_download_event_handler(esp_http_client_event_handle_t evt)
 {
-    struct TtsFileContext *ctx = (struct TtsFileContext *)evt->user_ctx;
+    struct TtsFileContext *ctx = (struct TtsFileContext *)evt->user_data;
     
     switch(evt->event_id) {
         case HTTP_EVENT_ON_DATA:
@@ -384,7 +384,7 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
         .url = TTS_API_URL,
         .method = HTTP_METHOD_POST,
         .event_handler = tts_download_event_handler,
-        .user_ctx = &file_ctx,
+        .user_data = &file_ctx,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
     };
