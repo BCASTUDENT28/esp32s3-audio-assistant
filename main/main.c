@@ -11,6 +11,7 @@
 #include "telegram.h"
 #include "audio_io.h"
 #include "memory_manager.h"
+#include "home_automation.h"
 
 static const char *TAG = "MAIN";
 
@@ -162,7 +163,7 @@ static void play_tts_response(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 8 (Memory System)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 9 (Home Automation)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
@@ -180,6 +181,9 @@ void app_main(void)
 
     // Initialize Memory Manager
     memory_manager_init();
+
+    // Initialize Home Automation peripherals
+    home_auto_init();
 
     // 3. Initialize Audio
     if (audio_io_init() != ESP_OK) {
