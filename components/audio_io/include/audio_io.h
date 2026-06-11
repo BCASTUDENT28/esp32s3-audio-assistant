@@ -57,6 +57,14 @@ esp_err_t audio_play_write(const int16_t *pcm16, size_t samples_count, size_t *s
 esp_err_t audio_play_stop(void);
 
 /**
+ * @brief Dynamically reconfigure the I2S TX sample rate.
+ * 
+ * @param sample_rate Sample rate in Hz (e.g., 16000, 24000).
+ * @return esp_err_t 
+ */
+esp_err_t audio_play_set_sample_rate(uint32_t sample_rate);
+
+/**
  * @brief Calculate the Root Mean Square (RMS) level of a buffer of audio samples.
  * Used for dynamic volume visualization (e.g. on the OLED).
  * 

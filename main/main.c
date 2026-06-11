@@ -16,7 +16,7 @@ static const char *TAG = "MAIN";
 #define BOOT_BUTTON_GPIO GPIO_NUM_0
 
 // WAV Header struct according to standard spec
-struct WavHeader {
+struct __attribute__((packed)) WavHeader {
     char riff_header[4];     // Contains "RIFF"
     int32_t wav_size;        // Size of the file in bytes minus 8
     char wave_header[4];     // Contains "WAVE"
@@ -107,9 +107,61 @@ static void record_user_voice(void)
     ESP_LOGI(TAG, "Recording completed. Captured %d bytes.", data_bytes);
 }
 
+// Play TTS Response audio file from SPIFFS
+static void play_tts_response(void)
+{
+    const char *filepath = "/spiffs/tts.wav";
+    FILE *f = fopen(filepath, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open tts.wav for playing");
+        oled_set_custom_message("PLAYBACK ERROR", "Could not open TTS audio");
+        oled_set_state(OLED_STATE_ERROR);
+        return;
+    }
+
+    // Read WAV header
+    struct WavHeader header;
+    if (fread(&header, 1, sizeof(struct WavHeader), f) != sizeof(struct WavHeader)) {
+        ESP_LOGE(TAG, "Failed to read WAV header from tts.wav");
+        fclose(f);
+        return;
+    }
+
+    if (memcmp(header.riff_header, "RIFF", 4) != 0 || memcmp(header.wave_header, "WAVE", 4) != 0) {
+        ESP_LOGE(TAG, "tts.wav is not a valid WAV file");
+        fclose(f);
+        return;
+    }
+
+    uint32_t sample_rate = header.sample_rate;
+    ESP_LOGI(TAG, "Playing TTS WAV: rate=%lu Hz, bits=%d, channels=%d", (unsigned long)sample_rate, header.bits_per_sample, header.num_channels);
+
+    // Reconfigure play sample rate based on header
+    audio_play_set_sample_rate(sample_rate);
+
+    oled_set_state(OLED_STATE_SPEAKING);
+    audio_play_start();
+
+    int16_t buffer[512];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+        size_t samples_count = bytes_read / sizeof(int16_t);
+        size_t samples_written = 0;
+        esp_err_t err = audio_play_write(buffer, samples_count, &samples_written, 100);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Playback write error: %s", esp_err_to_name(err));
+            break;
+        }
+    }
+
+    audio_play_stop();
+    fclose(f);
+    ESP_LOGI(TAG, "TTS Playback finished.");
+}
+
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 5 (Audio Subsystem)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 7 (Speaker & TTS)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
@@ -159,6 +211,7 @@ void app_main(void)
     ESP_LOGI(TAG, "System Ready! Press and Hold GPIO0 (BOOT button) to record WAV.");
 
     char query_text[256] = {0};
+    char reply_text[256] = {0};
     while (1) {
         // Poll BOOT button state (0 means pressed)
         if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
@@ -172,6 +225,32 @@ void app_main(void)
             if (err == ESP_OK) {
                 ESP_LOGI(TAG, "Transcription result: %s", query_text);
                 oled_set_custom_message("YOU SAID", query_text);
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                
+                // DeepSeek Chat Completion
+                oled_set_state(OLED_STATE_THINKING);
+                ESP_LOGI(TAG, "Sending prompt to DeepSeek LLM...");
+                err = backend_deepseek_chat(NULL, query_text, reply_text, sizeof(reply_text));
+                if (err == ESP_OK) {
+                    ESP_LOGI(TAG, "DeepSeek response: %s", reply_text);
+                    oled_set_custom_message("JARVIS", reply_text);
+                    
+                    // Text-To-Speech Synthesis
+                    ESP_LOGI(TAG, "Synthesizing text-to-speech...");
+                    err = backend_text_to_speech(NULL, reply_text, "/spiffs/tts.wav");
+                    if (err == ESP_OK) {
+                        // Play TTS response
+                        play_tts_response();
+                    } else {
+                        ESP_LOGE(TAG, "TTS synthesis failed.");
+                        oled_set_custom_message("TTS ERROR", "Failed to generate speech");
+                        oled_set_state(OLED_STATE_ERROR);
+                    }
+                } else {
+                    ESP_LOGE(TAG, "DeepSeek LLM query failed.");
+                    oled_set_custom_message("LLM ERROR", "Failed to get AI response");
+                    oled_set_state(OLED_STATE_ERROR);
+                }
             } else {
                 ESP_LOGE(TAG, "Transcription failed.");
                 oled_set_custom_message("STT ERROR", "Failed to transcribe audio");

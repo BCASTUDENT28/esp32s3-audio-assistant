@@ -241,6 +241,14 @@ esp_err_t audio_play_stop(void)
     return err;
 }
 
+esp_err_t audio_play_set_sample_rate(uint32_t sample_rate)
+{
+    if (!tx_handle) return ESP_ERR_INVALID_STATE;
+    ESP_LOGI(TAG, "Reconfiguring I2S TX sample rate to %lu Hz", (unsigned long)sample_rate);
+    i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
+    return i2s_channel_reconfig_std_clock(tx_handle, &clk_cfg);
+}
+
 float audio_calculate_rms(const int16_t *samples, size_t num_samples)
 {
     if (num_samples == 0) return 0.0f;
