@@ -1,0 +1,12 @@
+# ESP-IDF gitignore
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.old
+*.log
+.system_generated/
+.gemini/
+scratch/
+run_idf.ps1
+*~
+*.swp
