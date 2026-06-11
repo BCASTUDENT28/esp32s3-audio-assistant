@@ -158,10 +158,26 @@ void app_main(void)
     oled_set_state(OLED_STATE_READY);
     ESP_LOGI(TAG, "System Ready! Press and Hold GPIO0 (BOOT button) to record WAV.");
 
+    char query_text[256] = {0};
     while (1) {
         // Poll BOOT button state (0 means pressed)
         if (gpio_get_level(BOOT_BUTTON_GPIO) == 0) {
             record_user_voice();
+            
+            // Set display to thinking during STT processing
+            oled_set_state(OLED_STATE_THINKING);
+            ESP_LOGI(TAG, "Starting Speech-to-Text transcription...");
+            
+            esp_err_t err = backend_speech_to_text(NULL, query_text, sizeof(query_text));
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "Transcription result: %s", query_text);
+                oled_set_custom_message("YOU SAID", query_text);
+            } else {
+                ESP_LOGE(TAG, "Transcription failed.");
+                oled_set_custom_message("STT ERROR", "Failed to transcribe audio");
+                oled_set_state(OLED_STATE_ERROR);
+            }
+            
             vTaskDelay(pdMS_TO_TICKS(3000));
             oled_set_state(OLED_STATE_READY);
         }
