@@ -1,6 +1,7 @@
 #include "backend_client.h"
 #include "storage.h"
 #include "oled_display.h"
+#include "memory_manager.h"
 
 #include <string.h>
 #include <esp_log.h>
@@ -234,6 +235,18 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
     cJSON_AddStringToObject(sys_msg, "content", "You are a helpful voice assistant. Keep responses under 20 words.");
     cJSON_AddItemToArray(messages, sys_msg);
 
+    // Load and append conversation history if present
+    cJSON *history_arr = memory_load_history();
+    if (history_arr) {
+        int hist_size = cJSON_GetArraySize(history_arr);
+        for (int i = 0; i < hist_size; i++) {
+            cJSON *hist_item = cJSON_GetArrayItem(history_arr, i);
+            cJSON *item_copy = cJSON_Duplicate(hist_item, true);
+            cJSON_AddItemToArray(messages, item_copy);
+        }
+        cJSON_Delete(history_arr);
+    }
+
     cJSON *user_msg = cJSON_CreateObject();
     cJSON_AddStringToObject(user_msg, "role", "user");
     cJSON_AddStringToObject(user_msg, "content", query);
@@ -304,6 +317,10 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
                     strncpy(out_response, content->valuestring, max_len - 1);
                     out_response[max_len - 1] = '\0';
                     ESP_LOGI(TAG, "DeepSeek Reply: %s", out_response);
+                    
+                    // Add this turn to conversation history
+                    memory_add_to_history(query, out_response);
+                    
                     cJSON_Delete(json);
                     free(recv_buf);
                     return ESP_OK;

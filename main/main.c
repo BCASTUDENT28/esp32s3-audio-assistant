@@ -10,6 +10,7 @@
 #include "backend_client.h"
 #include "telegram.h"
 #include "audio_io.h"
+#include "memory_manager.h"
 
 static const char *TAG = "MAIN";
 
@@ -161,7 +162,7 @@ static void play_tts_response(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 7 (Speaker & TTS)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 8 (Memory System)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
@@ -176,6 +177,9 @@ void app_main(void)
         oled_set_state(OLED_STATE_ERROR);
         return;
     }
+
+    // Initialize Memory Manager
+    memory_manager_init();
 
     // 3. Initialize Audio
     if (audio_io_init() != ESP_OK) {

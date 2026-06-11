@@ -1,6 +1,7 @@
 #include "telegram.h"
 #include "storage.h"
 #include "ota.h"
+#include "memory_manager.h"
 
 #include <string.h>
 #include <esp_log.h>
@@ -99,11 +100,16 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
         esp_restart();
     } 
     else if (strcmp(text, "/clear") == 0) {
-        telegram_send_message(token, chat_id, "Clearing all configuration from NVS and resetting to AP mode...");
+        telegram_send_message(token, chat_id, "Clearing configuration and conversation history, resetting to AP mode...");
+        memory_clear_history();
         vTaskDelay(pdMS_TO_TICKS(1000));
         storage_clear_all();
         esp_restart();
     } 
+    else if (strcmp(text, "/clear_history") == 0) {
+        memory_clear_history();
+        telegram_send_message(token, chat_id, "Conversation memory cleared successfully.");
+    }
     else if (strncmp(text, "/ota ", 5) == 0) {
         const char *ota_url = text + 5;
         char reply[256];
@@ -123,6 +129,7 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
             "Supported commands:\n"
             "/status - View system status\n"
             "/reboot - Reboot device\n"
+            "/clear_history - Clear conversation history memory\n"
             "/clear - Clear network keys and reset\n"
             "/ota <url> - Flash firmware update over HTTPS");
     }
