@@ -163,7 +163,7 @@ static void play_tts_response(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 9 (Home Automation)...");
+    ESP_LOGI(TAG, "Initializing JARVIS-S3 Phase 10 (OTA System)...");
 
     // 1. Initialize Display
     if (oled_init() == ESP_OK) {
