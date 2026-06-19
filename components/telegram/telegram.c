@@ -2,6 +2,10 @@
 #include "storage.h"
 #include "ota.h"
 #include "memory_manager.h"
+#include "backend_client.h"
+#include "oled_display.h"
+#include "audio_io.h"
+#include "assistant_common.h"
 
 #include <string.h>
 #include <esp_log.h>
@@ -72,6 +76,43 @@ static void telegram_send_message(const char *token, int64_t chat_id, const char
     free(post_data);
 }
 
+// Play TTS audio from SPIFFS
+static void telegram_play_tts(const char *filepath)
+{
+    FILE *f = fopen(filepath, "rb");
+    if (!f) {
+        ESP_LOGE(TAG, "Failed to open %s for playing", filepath);
+        return;
+    }
+
+    struct WavHeader header;
+    if (fread(&header, 1, sizeof(struct WavHeader), f) != sizeof(struct WavHeader)) {
+        fclose(f);
+        return;
+    }
+
+    if (memcmp(header.riff_header, "RIFF", 4) != 0 || memcmp(header.wave_header, "WAVE", 4) != 0) {
+        fclose(f);
+        return;
+    }
+
+    audio_play_set_sample_rate(header.sample_rate);
+    oled_set_state(OLED_STATE_SPEAKING);
+    audio_transition_to_playback();
+
+    int16_t buffer[512];
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+        size_t samples_count = bytes_read / sizeof(int16_t);
+        size_t samples_written = 0;
+        if (assistant_is_cancelled()) break;
+        audio_play_write(buffer, samples_count, &samples_written, 100);
+    }
+
+    audio_play_stop();
+    fclose(f);
+}
+
 // Process single bot message
 static void handle_telegram_message(const char *token, int64_t chat_id, const char *text)
 {
@@ -123,7 +164,7 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
             telegram_send_message(token, chat_id, fail_reply);
         }
     } 
-    else {
+    else if (text[0] == '/') {
         telegram_send_message(token, chat_id, 
             "Unknown Bot Command.\n"
             "Supported commands:\n"
@@ -132,6 +173,60 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
             "/clear_history - Clear conversation history memory\n"
             "/clear - Clear network keys and reset\n"
             "/ota <url> - Flash firmware update over HTTPS");
+    } 
+    else {
+        // DeepSeek Chat Mode
+        ESP_LOGI(TAG, "Telegram message received: '%s'", text);
+        telegram_send_message(token, chat_id, "Thinking...");
+        oled_set_state(OLED_STATE_THINKING);
+
+        char *ds_reply = malloc(2048);
+        if (ds_reply) {
+            ds_reply[0] = '\0';
+            ESP_LOGI(TAG, "DeepSeek request sent");
+            esp_err_t err = backend_deepseek_chat(NULL, text, ds_reply, 2048);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "DeepSeek response received: '%s'", ds_reply);
+                // Send back to Telegram
+                telegram_send_message(token, chat_id, ds_reply);
+                ESP_LOGI(TAG, "Telegram reply sent");
+
+                // Display first line on OLED
+                char first_line[64] = {0};
+                strncpy(first_line, ds_reply, 63);
+                char *newline = strchr(first_line, '\n');
+                if (newline) *newline = '\0';
+                
+                oled_set_custom_message("JARVIS", first_line);
+
+                // Text-To-Speech Synthesis (only if OpenAI key is available)
+                char tts_key_check[192] = {0};
+                if (storage_read_string("openai_key", tts_key_check, sizeof(tts_key_check)) == ESP_OK && strlen(tts_key_check) > 0) {
+                    ESP_LOGI(TAG, "Synthesizing text-to-speech...");
+                    esp_err_t tts_err = backend_text_to_speech(NULL, ds_reply, "/spiffs/telegram_tts.wav");
+                    if (tts_err == ESP_OK) {
+                        ESP_LOGI(TAG, "Playing TTS audio...");
+                        telegram_play_tts("/spiffs/telegram_tts.wav");
+                        // Restore custom message after speaking animation completes
+                        oled_set_custom_message("JARVIS", first_line);
+                    } else {
+                        ESP_LOGW(TAG, "TTS synthesis failed — text reply sent without audio.");
+                    }
+                } else {
+                    ESP_LOGI(TAG, "No OpenAI key — skipping TTS. Text reply sent to Telegram.");
+                }
+
+                // Save to memory
+                memory_add_to_history(text, ds_reply);
+                ESP_LOGI(TAG, "Memory saved");
+            } else {
+                ESP_LOGE(TAG, "DeepSeek request failed: %s", esp_err_to_name(err));
+                telegram_send_message(token, chat_id, "Error: DeepSeek API failed. Check serial logs for details.");
+                oled_set_state(OLED_STATE_ERROR);
+                oled_set_custom_message("CHAT ERROR", "DeepSeek failed");
+            }
+            free(ds_reply);
+        }
     }
 }
 

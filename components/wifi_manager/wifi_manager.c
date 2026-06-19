@@ -70,6 +70,10 @@ static const char* setup_html =
 "<label>Telegram Bot Token</label>"
 "<input type='password' name='tg_token' placeholder='123456:ABC-xxx...'>"
 "</div>"
+"<div class='form-group'>"
+"<label>OpenAI API Key (Voice)</label>"
+"<input type='password' name='oa_key' placeholder='sk-proj-xxxxxx...'>"
+"</div>"
 "<button type='submit'>SAVE CONFIGURATION</button>"
 "</form>"
 "<div class='footer'>ESP32-S3 Voice Assistant Setup Portal</div>"
@@ -167,7 +171,7 @@ static esp_err_t get_query_key_value(const char* query, const char* key, char* b
 // Handle Configuration Save Endpoint
 static esp_err_t save_get_handler(httpd_req_t *req)
 {
-    char query[256] = {0};
+    char query[512] = {0};
     if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Query string empty");
         return ESP_FAIL;
@@ -177,11 +181,13 @@ static esp_err_t save_get_handler(httpd_req_t *req)
     char pass[64] = {0};
     char ds_key[96] = {0};
     char tg_token[64] = {0};
+    char oa_key[160] = {0};
 
     get_query_key_value(query, "ssid", ssid, sizeof(ssid));
     get_query_key_value(query, "pass", pass, sizeof(pass));
     get_query_key_value(query, "ds_key", ds_key, sizeof(ds_key));
     get_query_key_value(query, "tg_token", tg_token, sizeof(tg_token));
+    get_query_key_value(query, "oa_key", oa_key, sizeof(oa_key));
 
     ESP_LOGI(TAG, "Saving configurations to NVS: SSID=%s", ssid);
 
@@ -190,6 +196,7 @@ static esp_err_t save_get_handler(httpd_req_t *req)
         storage_save_string("wifi_pass", pass);
         if (strlen(ds_key) > 0) storage_save_string("deepseek_key", ds_key);
         if (strlen(tg_token) > 0) storage_save_string("telegram_token", tg_token);
+        if (strlen(oa_key) > 0) storage_save_string("openai_key", oa_key);
 
         const char* success_resp = 
         "<html><head><style>body { background:#07060A; color:#E2E1E6; font-family:sans-serif; text-align:center; padding-top:100px; }</style></head>"

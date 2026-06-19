@@ -1,6 +1,7 @@
 #include "audio_io.h"
 #include <esp_log.h>
 #include <driver/i2s_std.h>
+#include <driver/i2s_pdm.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <math.h>
@@ -77,7 +78,7 @@ esp_err_t audio_io_init(void)
 
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(16000), // 16kHz
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO), // Stereo for DAC compatibility
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = I2S_TX_BCLK_IO,
@@ -91,13 +92,14 @@ esp_err_t audio_io_init(void)
             },
         },
     };
+    tx_std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
 
     err = i2s_channel_init_std_mode(tx_handle, &tx_std_cfg);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize I2S TX channel: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to initialize I2S Standard TX channel: %s", esp_err_to_name(err));
         return err;
     }
-    ESP_LOGI(TAG, "I2S TX (DAC) initialized on GPIO BCLK:%d, WS:%d, DOUT:%d", I2S_TX_BCLK_IO, I2S_TX_WS_IO, I2S_TX_DOUT_IO);
+    ESP_LOGI(TAG, "I2S Standard TX initialized on GPIO BCLK:%d, WS:%d, DOUT:%d", I2S_TX_BCLK_IO, I2S_TX_WS_IO, I2S_TX_DOUT_IO);
 
     return ESP_OK;
 }
@@ -244,7 +246,7 @@ esp_err_t audio_play_stop(void)
 esp_err_t audio_play_set_sample_rate(uint32_t sample_rate)
 {
     if (!tx_handle) return ESP_ERR_INVALID_STATE;
-    ESP_LOGI(TAG, "Reconfiguring I2S TX sample rate to %lu Hz", (unsigned long)sample_rate);
+    ESP_LOGI(TAG, "Reconfiguring I2S Standard TX sample rate to %lu Hz", (unsigned long)sample_rate);
     i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate);
     return i2s_channel_reconfig_std_clock(tx_handle, &clk_cfg);
 }
@@ -261,4 +263,130 @@ float audio_calculate_rms(const int16_t *samples, size_t num_samples)
     
     float rms = sqrtf((float)(sum / num_samples));
     return rms;
+}
+
+void audio_force_stop_all(void)
+{
+    ESP_LOGW(TAG, "Force-stopping all audio channels.");
+    if (tx_active) {
+        i2s_channel_disable(tx_handle);
+        tx_active = false;
+    }
+    if (rx_active) {
+        i2s_channel_disable(rx_handle);
+        rx_active = false;
+    }
+}
+
+esp_err_t audio_transition_to_recording(void)
+{
+    ESP_LOGI(TAG, "Transitioning to RECORDING mode.");
+    // Stop speaker first
+    if (tx_active) {
+        i2s_channel_disable(tx_handle);
+        tx_active = false;
+    }
+    // Start microphone
+    if (!rx_active) {
+        esp_err_t err = i2s_channel_enable(rx_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to enable RX channel: %s", esp_err_to_name(err));
+            return err;
+        }
+        rx_active = true;
+    }
+    return ESP_OK;
+}
+
+esp_err_t audio_transition_to_playback(void)
+{
+    ESP_LOGI(TAG, "Transitioning to PLAYBACK mode.");
+    // Stop microphone first
+    if (rx_active) {
+        i2s_channel_disable(rx_handle);
+        rx_active = false;
+    }
+    // Start speaker
+    if (!tx_active) {
+        esp_err_t err = i2s_channel_enable(tx_handle);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to enable TX channel: %s", esp_err_to_name(err));
+            return err;
+        }
+        tx_active = true;
+    }
+    return ESP_OK;
+}
+
+void audio_play_listen_beep(int count)
+{
+    // Each beep: 100ms of 880Hz sine wave, 80ms silence between beeps
+    const int sample_rate = 16000;
+    const int beep_samples = sample_rate / 10;  // 100ms = 1600 samples
+    const int silence_samples = sample_rate * 80 / 1000;  // 80ms
+    
+    audio_play_set_sample_rate(sample_rate);
+    audio_transition_to_playback();
+    
+    int16_t *buf = malloc(256 * sizeof(int16_t));
+    if (!buf) return;
+    
+    for (int b = 0; b < count; b++) {
+        // Play beep
+        size_t written = 0;
+        for (int i = 0; i < beep_samples; i += 256) {
+            int chunk = (beep_samples - i > 256) ? 256 : (beep_samples - i);
+            for (int j = 0; j < chunk; j++) {
+                float t = (float)(i + j) / sample_rate;
+                buf[j] = (int16_t)(sinf(2.0f * M_PI * 880.0f * t) * 8000.0f);
+            }
+            audio_play_write(buf, chunk, &written, 100);
+        }
+        
+        // Silence between beeps (if more beeps follow)
+        if (b < count - 1) {
+            memset(buf, 0, 256 * sizeof(int16_t));
+            for (int i = 0; i < silence_samples; i += 256) {
+                int chunk = (silence_samples - i > 256) ? 256 : (silence_samples - i);
+                audio_play_write(buf, chunk, &written, 100);
+            }
+        }
+    }
+    
+    // Small tail silence to flush DMA
+    memset(buf, 0, 256 * sizeof(int16_t));
+    size_t w = 0;
+    audio_play_write(buf, 256, &w, 100);
+    
+    free(buf);
+    audio_play_stop();
+}
+
+void audio_play_error_tone(void)
+{
+    // Descending tone: 660Hz -> 440Hz -> 330Hz, 100ms each
+    const int sample_rate = 16000;
+    const int tone_samples = sample_rate / 10;  // 100ms
+    const float freqs[] = {660.0f, 440.0f, 330.0f};
+    
+    audio_play_set_sample_rate(sample_rate);
+    audio_transition_to_playback();
+    
+    int16_t *buf = malloc(256 * sizeof(int16_t));
+    if (!buf) return;
+    
+    for (int f = 0; f < 3; f++) {
+        size_t written = 0;
+        for (int i = 0; i < tone_samples; i += 256) {
+            int chunk = (tone_samples - i > 256) ? 256 : (tone_samples - i);
+            for (int j = 0; j < chunk; j++) {
+                float t = (float)(i + j) / sample_rate;
+                buf[j] = (int16_t)(sinf(2.0f * M_PI * freqs[f] * t) * 6000.0f);
+            }
+            audio_play_write(buf, chunk, &written, 100);
+        }
+    }
+    
+    free(buf);
+    audio_play_stop();
 }

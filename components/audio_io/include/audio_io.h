@@ -73,5 +73,36 @@ esp_err_t audio_play_set_sample_rate(uint32_t sample_rate);
  * @return float Normalized value between 0.0 (silent) and 1.0 (clipping).
  */
 float audio_calculate_rms(const int16_t *samples, size_t num_samples);
+/**
+ * @brief Force-stop all audio activity (both speaker and microphone).
+ * Safe to call from any state. Resets both rx_active and tx_active.
+ */
+void audio_force_stop_all(void);
+
+/**
+ * @brief Safely transition to recording mode.
+ * Stops the speaker first, then starts the microphone.
+ * @return esp_err_t
+ */
+esp_err_t audio_transition_to_recording(void);
+
+/**
+ * @brief Safely transition to playback mode.
+ * Stops the microphone first, then starts the speaker.
+ * @return esp_err_t
+ */
+esp_err_t audio_transition_to_playback(void);
+
+/**
+ * @brief Play a short listening beep (~100ms, 880Hz).
+ * Uses the I2S speaker. Caller should ensure speaker is available.
+ * @param count Number of beeps (1 = listening, 2 = interrupted)
+ */
+void audio_play_listen_beep(int count);
+
+/**
+ * @brief Play an error tone (~300ms descending).
+ */
+void audio_play_error_tone(void);
 
 #endif // AUDIO_IO_H

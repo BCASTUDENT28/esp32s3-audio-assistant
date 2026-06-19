@@ -10,7 +10,7 @@
 
 static const char *TAG = "OLED";
 
-#define I2C_PORT            I2C_NUM_0
+#define I2C_PORT            I2C_NUM_1
 #define SDA_GPIO            9
 #define SCL_GPIO            8
 #define SSD1306_I2C_ADDR    0x3C
@@ -36,7 +36,7 @@ static esp_err_t ssd1306_write_cmd(uint8_t cmd)
 {
     if (!oled_dev_handle) return ESP_ERR_INVALID_STATE;
     uint8_t write_buf[2] = {0x00, cmd}; // 0x00 for Command
-    return i2c_master_transmit(oled_dev_handle, write_buf, 2, -1);
+    return i2c_master_transmit(oled_dev_handle, write_buf, 2, 1000);
 }
 
 static esp_err_t ssd1306_write_data(const uint8_t *data, size_t len)
@@ -46,7 +46,7 @@ static esp_err_t ssd1306_write_data(const uint8_t *data, size_t len)
     if (!write_buf) return ESP_ERR_NO_MEM;
     write_buf[0] = 0x40; // 0x40 for Data
     memcpy(&write_buf[1], data, len);
-    esp_err_t err = i2c_master_transmit(oled_dev_handle, write_buf, len + 1, -1);
+    esp_err_t err = i2c_master_transmit(oled_dev_handle, write_buf, len + 1, 1000);
     free(write_buf);
     return err;
 }
@@ -213,6 +213,15 @@ static void oled_animation_task(void *pvParameters)
                         }
                         break;
                     }
+                    case OLED_STATE_TRANSCRIBING: {
+                        oled_draw_string(14, 24, "TRANSCRIBING");
+                        // Animated dots indicator
+                        int dots_t = (frame_count / 8) % 4;
+                        if (dots_t == 1) oled_draw_string(56, 38, ".");
+                        else if (dots_t == 2) oled_draw_string(53, 38, "..");
+                        else if (dots_t == 3) oled_draw_string(50, 38, "...");
+                        break;
+                    }
                     case OLED_STATE_THINKING: {
                         oled_draw_string(32, 16, "Thinking...");
                         // Rotating loader animation
@@ -222,6 +231,11 @@ static void oled_animation_task(void *pvParameters)
                         int y_tip = yc + (int)(r * sinf(angle));
                         oled_draw_circle(xc, yc, r, true);
                         oled_draw_line(xc, yc, x_tip, y_tip, true);
+                        break;
+                    }
+                    case OLED_STATE_GENERATING_VOICE: {
+                        oled_draw_string(23, 24, "GENERATING");
+                        oled_draw_string(35, 38, "VOICE...");
                         break;
                     }
                     case OLED_STATE_SPEAKING: {
@@ -281,6 +295,7 @@ esp_err_t oled_init(void)
         .i2c_port = I2C_PORT,
         .scl_io_num = SCL_GPIO,
         .sda_io_num = SDA_GPIO,
+        .glitch_ignore_cnt = 7,
         .flags.enable_internal_pullup = true,
     };
     i2c_master_bus_handle_t bus_handle;
@@ -288,6 +303,19 @@ esp_err_t oled_init(void)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize I2C master bus: %s", esp_err_to_name(err));
         return err;
+    }
+
+    ESP_LOGI(TAG, "Scanning I2C Bus on SDA=%d SCL=%d...", SDA_GPIO, SCL_GPIO);
+    bool found_device = false;
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        esp_err_t res = i2c_master_probe(bus_handle, addr, 100);
+        if (res == ESP_OK) {
+            ESP_LOGI(TAG, "Found I2C device at address 0x%02x", addr);
+            found_device = true;
+        }
+    }
+    if (!found_device) {
+        ESP_LOGW(TAG, "No I2C devices found on bus!");
     }
 
     // 2. Add SSD1306 device to bus
