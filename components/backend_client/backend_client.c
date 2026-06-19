@@ -433,30 +433,6 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
     return ESP_FAIL;
 }
 
-// Struct to track TTS file download write status
-struct TtsFileContext {
-    FILE *file;
-    size_t total_written;
-};
-
-// TTS HTTP Event Handler to stream audio directly to SPIFFS without accumulating in RAM
-static esp_err_t tts_download_event_handler(esp_http_client_event_handle_t evt)
-{
-    struct TtsFileContext *ctx = (struct TtsFileContext *)evt->user_data;
-    
-    switch(evt->event_id) {
-        case HTTP_EVENT_ON_DATA:
-            if (ctx && ctx->file && evt->data_len > 0) {
-                size_t written = fwrite(evt->data, 1, evt->data_len, ctx->file);
-                ctx->total_written += written;
-                ESP_LOGD(TAG, "Downloaded %d bytes to file", evt->data_len);
-            }
-            break;
-        default:
-            break;
-    }
-    return ESP_OK;
-}
 
 typedef struct {
     RingbufHandle_t ringbuf;
@@ -474,7 +450,8 @@ static void tts_playback_task(void *pvParameters)
     while (1) {
         void *data = xRingbufferReceive(ctx->ringbuf, &item_size, pdMS_TO_TICKS(50));
         if (data != NULL) {
-            audio_play_write(data, item_size);
+            size_t samples_written = 0;
+            audio_play_write((const int16_t *)data, item_size / 2, &samples_written, portMAX_DELAY);
             vRingbufferReturnItem(ctx->ringbuf, data);
         } else {
             if (ctx->download_complete) {
