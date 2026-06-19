@@ -10,6 +10,10 @@
 #include <esp_http_client.h>
 #include <esp_crt_bundle.h>
 #include <cJSON.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/ringbuf.h>
+#include "audio_io.h"
 
 static const char *TAG = "BACKEND";
 
@@ -183,8 +187,8 @@ esp_err_t backend_speech_to_text(const char* api_key, char* out_text, size_t max
     // 1. Write multipart header
     esp_http_client_write(client, multipart_header, header_len);
 
-    // 2. Write file data in chunks of 512 bytes
-    char chunk[512];
+    // 2. Write file data in chunks of 4096 bytes
+    char chunk[4096];
     size_t read_bytes;
     size_t total_uploaded = 0;
     while ((read_bytes = fread(chunk, 1, sizeof(chunk), f)) > 0) {
@@ -454,12 +458,44 @@ static esp_err_t tts_download_event_handler(esp_http_client_event_handle_t evt)
     return ESP_OK;
 }
 
-esp_err_t backend_text_to_speech(const char* api_key, const char* text, const char* out_filepath)
+typedef struct {
+    RingbufHandle_t ringbuf;
+    volatile bool download_complete;
+    SemaphoreHandle_t done_sem;
+} tts_stream_ctx_t;
+
+static void tts_playback_task(void *pvParameters)
+{
+    tts_stream_ctx_t *ctx = (tts_stream_ctx_t *)pvParameters;
+    size_t item_size;
+    
+    ESP_LOGI(TAG, "[TTS] Playback task started, waiting for audio...");
+    
+    while (1) {
+        void *data = xRingbufferReceive(ctx->ringbuf, &item_size, pdMS_TO_TICKS(50));
+        if (data != NULL) {
+            audio_play_write(data, item_size);
+            vRingbufferReturnItem(ctx->ringbuf, data);
+        } else {
+            if (ctx->download_complete) {
+                break;
+            }
+        }
+        if (assistant_is_cancelled()) {
+            break;
+        }
+    }
+    
+    ESP_LOGI(TAG, "[TTS] Playback task terminating.");
+    xSemaphoreGive(ctx->done_sem);
+    vTaskDelete(NULL);
+}
+
+esp_err_t backend_text_to_speech(const char* api_key, const char* text)
 {
     ESP_LOGI(TAG, "========== [OPENAI TTS] ===========");
     ESP_LOGI(TAG, "[TTS] Endpoint: %s", TTS_API_URL);
     ESP_LOGI(TAG, "[TTS] Text to synthesize: \"%s\"", text);
-    ESP_LOGI(TAG, "[TTS] Output file: %s", out_filepath);
     
     char key_buf[192] = {0};
     bool key_from_nvs = false;
@@ -473,18 +509,6 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
         key_from_nvs = true;
     }
     ESP_LOGI(TAG, "[TTS] API key loaded: %s (first 8 chars: %.8s...)", key_from_nvs ? "from NVS" : "passed directly", api_key);
-
-    // Create file to save the audio stream
-    FILE *f = fopen(out_filepath, "wb");
-    if (!f) {
-        ESP_LOGE(TAG, "[TTS] FAILED: Cannot open %s for writing. SPIFFS full or path error.", out_filepath);
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    struct TtsFileContext file_ctx = {
-        .file = f,
-        .total_written = 0
-    };
 
     // Build OpenAI-compatible TTS JSON Request
     cJSON *root = cJSON_CreateObject();
@@ -500,15 +524,12 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
     esp_http_client_config_t config = {
         .url = TTS_API_URL,
         .method = HTTP_METHOD_POST,
-        .event_handler = tts_download_event_handler,
-        .user_data = &file_ctx,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 30000,
     };
 
     esp_http_client_handle_t client = esp_http_client_init(&config);
     if (!client) {
-        fclose(f);
         free(json_post_data);
         ESP_LOGE(TAG, "[TTS] FAILED: esp_http_client_init returned NULL. DNS or memory failure.");
         return ESP_FAIL;
@@ -530,7 +551,6 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
         ESP_LOGE(TAG, "[TTS] FAILED: TLS/DNS connection error: %s (0x%x)", esp_err_to_name(err), err);
         ESP_LOGE(TAG, "[TTS] This usually means DNS resolution failed or TLS handshake was rejected.");
         esp_http_client_cleanup(client);
-        fclose(f);
         free(json_post_data);
         return err;
     }
@@ -544,52 +564,92 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
     ESP_LOGI(TAG, "[TTS] HTTP Status Code: %d", status_code);
 
     if (status_code != 200) {
-        // For error responses, read the error body into a buffer instead of writing to file
+        // For error responses, read the error body into a buffer instead
         char err_buf[1024] = {0};
         int read_len = esp_http_client_read(client, err_buf, sizeof(err_buf) - 1);
         if (read_len > 0) err_buf[read_len] = '\0';
-        fclose(f);
         esp_http_client_cleanup(client);
-        unlink(out_filepath);
 
         ESP_LOGE(TAG, "[TTS] FAILED: OpenAI TTS API returned HTTP %d", status_code);
         ESP_LOGE(TAG, "[TTS] Server response body: %s", err_buf);
-        if (status_code == 401) {
-            ESP_LOGE(TAG, "[TTS] 401 = Invalid API key. Check 'openai_key' in NVS.");
-        } else if (status_code == 429) {
-            ESP_LOGE(TAG, "[TTS] 429 = Rate limited or quota exceeded.");
-        } else if (status_code == 500 || status_code == 503) {
-            ESP_LOGE(TAG, "[TTS] %d = OpenAI server error. Try again later.", status_code);
-        }
         return ESP_FAIL;
     }
 
-    // Read full stream into file
-    char temp_buf[512];
+    // Prepare Ring Buffer and Playback Task
+    RingbufHandle_t ringbuf = xRingbufferCreate(16384, RINGBUF_TYPE_BYTEBUF);
+    if (!ringbuf) {
+        ESP_LOGE(TAG, "[TTS] FAILED to create ringbuffer.");
+        esp_http_client_cleanup(client);
+        return ESP_ERR_NO_MEM;
+    }
+
+    tts_stream_ctx_t stream_ctx = {
+        .ringbuf = ringbuf,
+        .download_complete = false,
+        .done_sem = xSemaphoreCreateBinary()
+    };
+
+    // Transition to playback immediately to let OLED and I2S know we're speaking
+    audio_play_set_sample_rate(24000);
+    audio_transition_to_playback();
+
+    TaskHandle_t playback_task_handle = NULL;
+    xTaskCreatePinnedToCore(tts_playback_task, "tts_play", 4096, &stream_ctx, 5, &playback_task_handle, 1);
+
+    // Read full stream and push to ring buffer
+    char temp_buf[4096];
     int read_len;
+    size_t total_read = 0;
+    bool header_skipped = false;
+
     while ((read_len = esp_http_client_read(client, temp_buf, sizeof(temp_buf))) > 0) {
         if (assistant_is_cancelled()) {
             ESP_LOGW(TAG, "[TTS] Cancelled during download.");
-            fclose(f);
-            assistant_unregister_http_client();
-            esp_http_client_cleanup(client);
-            unlink(out_filepath);
-            return ESP_ERR_INVALID_STATE;
+            break;
         }
-        size_t written = fwrite(temp_buf, 1, read_len, f);
-        file_ctx.total_written += written;
+
+        char *data_ptr = temp_buf;
+        int data_len = read_len;
+
+        // Skip 44-byte WAV header
+        if (!header_skipped) {
+            if (total_read + read_len >= 44) {
+                int skip_bytes = 44 - total_read;
+                data_ptr += skip_bytes;
+                data_len -= skip_bytes;
+                header_skipped = true;
+            } else {
+                total_read += read_len;
+                continue;
+            }
+        }
+
+        total_read += read_len;
+
+        if (data_len > 0) {
+            // Push to ringbuffer, waiting up to 2 seconds if full
+            xRingbufferSend(stream_ctx.ringbuf, data_ptr, data_len, pdMS_TO_TICKS(2000));
+        }
     }
 
-    fclose(f);
+    // Cleanup and wait for playback to finish
+    stream_ctx.download_complete = true;
+
+    if (assistant_is_cancelled()) {
+        xSemaphoreTake(stream_ctx.done_sem, pdMS_TO_TICKS(1000));
+    } else {
+        xSemaphoreTake(stream_ctx.done_sem, portMAX_DELAY);
+    }
+
+    vSemaphoreDelete(stream_ctx.done_sem);
+    vRingbufferDelete(stream_ctx.ringbuf);
     assistant_unregister_http_client();
     esp_http_client_cleanup(client);
 
-    if (file_ctx.total_written > 44) {
-        ESP_LOGI(TAG, "[TTS] SUCCESS — Audio downloaded: %d bytes to %s", (int)file_ctx.total_written, out_filepath);
+    if (total_read > 44 && !assistant_is_cancelled()) {
+        ESP_LOGI(TAG, "[TTS] SUCCESS — Streaming completed.");
         return ESP_OK;
     }
 
-    ESP_LOGE(TAG, "[TTS] FAILED: Downloaded file too small (%d bytes). Expected WAV with >44 byte header.", (int)file_ctx.total_written);
-    unlink(out_filepath);
     return ESP_FAIL;
 }

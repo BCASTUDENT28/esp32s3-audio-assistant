@@ -198,63 +198,6 @@ static bool record_user_voice(void)
 }
 
 // ============================================================================
-// Play TTS Response with Interrupt Support
-// ============================================================================
-static void play_tts_response(void)
-{
-    const char *filepath = "/spiffs/tts.wav";
-    FILE *f = fopen(filepath, "rb");
-    if (!f) {
-        ESP_LOGE(TAG, "[TTS] Failed to open tts.wav for playing");
-        return;
-    }
-
-    // Read and validate WAV header
-    struct WavHeader header;
-    if (fread(&header, 1, sizeof(struct WavHeader), f) != sizeof(struct WavHeader)) {
-        ESP_LOGE(TAG, "[TTS] Failed to read WAV header");
-        fclose(f);
-        return;
-    }
-
-    if (memcmp(header.riff_header, "RIFF", 4) != 0 || memcmp(header.wave_header, "WAVE", 4) != 0) {
-        ESP_LOGE(TAG, "[TTS] Invalid WAV file");
-        fclose(f);
-        return;
-    }
-
-    uint32_t sample_rate = header.sample_rate;
-    ESP_LOGI(TAG, "[TTS] Speaking: rate=%luHz, bits=%d, ch=%d", 
-             (unsigned long)sample_rate, header.bits_per_sample, header.num_channels);
-
-    // Reconfigure speaker sample rate and transition to playback
-    audio_play_set_sample_rate(sample_rate);
-    audio_transition_to_playback();
-
-    int16_t buffer[512];
-    size_t bytes_read;
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-        // Check for interrupt during playback
-        if (assistant_is_cancelled()) {
-            ESP_LOGW(TAG, "[AUDIO] Playback interrupted by user.");
-            break;
-        }
-
-        size_t samples_count = bytes_read / sizeof(int16_t);
-        size_t samples_written = 0;
-        esp_err_t err = audio_play_write(buffer, samples_count, &samples_written, 100);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "[TTS] Playback write error: %s", esp_err_to_name(err));
-            break;
-        }
-    }
-
-    audio_play_stop();
-    fclose(f);
-    ESP_LOGI(TAG, "[TTS] Playback finished.");
-}
-
-// ============================================================================
 // Parse Home Automation Commands from AI Response
 // ============================================================================
 static void parse_home_automation_commands(char *reply_text)
@@ -424,31 +367,22 @@ static void assistant_task(void *pvParameters)
         parse_home_automation_commands(reply_text);
 
         // ============================================================
-        // STATE: TTS_GENERATING
+        // STATE: SPEAKING (Streaming from Network)
         // ============================================================
-        g_assistant_state = ASSISTANT_STATE_TTS_GENERATING;
-        oled_set_state(OLED_STATE_GENERATING_VOICE);
-        ESP_LOGI(TAG, "[TTS] Generating speech...");
+        g_assistant_state = ASSISTANT_STATE_SPEAKING;
+        oled_set_state(OLED_STATE_SPEAKING);
+        ESP_LOGI(TAG, "[TTS] Streaming speech...");
 
-        err = backend_text_to_speech(NULL, reply_text, "/spiffs/tts.wav");
+        err = backend_text_to_speech(NULL, reply_text);
         
         if (assistant_is_cancelled()) {
-            ESP_LOGW(TAG, "Cancelled during TTS generation. Restarting...");
+            ESP_LOGW(TAG, "Cancelled during TTS playback. Restarting...");
             continue;
         }
         if (err != ESP_OK) {
             handle_error("Voice generation failed");
             continue;
         }
-
-        // ============================================================
-        // STATE: SPEAKING
-        // ============================================================
-        g_assistant_state = ASSISTANT_STATE_SPEAKING;
-        oled_set_state(OLED_STATE_SPEAKING);
-        ESP_LOGI(TAG, "[TTS] Speaking");
-
-        play_tts_response();
 
         // ============================================================
         // STATE: IDLE (return to ready)

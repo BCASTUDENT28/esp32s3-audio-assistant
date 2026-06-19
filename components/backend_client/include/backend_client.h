@@ -28,14 +28,12 @@ esp_err_t backend_speech_to_text(const char* api_key, char* out_text, size_t max
 esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* out_response, size_t max_len);
 
 /**
- * @brief Convert response text to speech using OpenAI TTS or compatible API.
- * Downloads the resulting MP3 or WAV file directly onto SPIFFS.
- * 
+ * @brief Streams Text-to-Speech audio from OpenAI directly to I2S via a Ring Buffer.
+ *
  * @param api_key OpenAI/compatible API Key. If NULL, tries to read from storage.
- * @param text Text response to be synthesized.
- * @param out_filepath Target file path on SPIFFS to save audio (e.g. "/spiffs/tts.mp3").
- * @return esp_err_t 
+ * @param text The text to synthesize.
+ * @return esp_err_t ESP_OK if streaming completes successfully.
  */
-esp_err_t backend_text_to_speech(const char* api_key, const char* text, const char* out_filepath);
+esp_err_t backend_text_to_speech(const char* api_key, const char *text);
 
 #endif // BACKEND_CLIENT_H

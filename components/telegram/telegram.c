@@ -76,44 +76,7 @@ static void telegram_send_message(const char *token, int64_t chat_id, const char
     free(post_data);
 }
 
-// Play TTS audio from SPIFFS
-static void telegram_play_tts(const char *filepath)
-{
-    FILE *f = fopen(filepath, "rb");
-    if (!f) {
-        ESP_LOGE(TAG, "Failed to open %s for playing", filepath);
-        return;
-    }
-
-    struct WavHeader header;
-    if (fread(&header, 1, sizeof(struct WavHeader), f) != sizeof(struct WavHeader)) {
-        fclose(f);
-        return;
-    }
-
-    if (memcmp(header.riff_header, "RIFF", 4) != 0 || memcmp(header.wave_header, "WAVE", 4) != 0) {
-        fclose(f);
-        return;
-    }
-
-    audio_play_set_sample_rate(header.sample_rate);
-    oled_set_state(OLED_STATE_SPEAKING);
-    audio_transition_to_playback();
-
-    int16_t buffer[512];
-    size_t bytes_read;
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-        size_t samples_count = bytes_read / sizeof(int16_t);
-        size_t samples_written = 0;
-        if (assistant_is_cancelled()) break;
-        audio_play_write(buffer, samples_count, &samples_written, 100);
-    }
-
-    audio_play_stop();
-    fclose(f);
-}
-
-// Process single bot message
+// Handle individual telegram messages// Process single bot message
 static void handle_telegram_message(const char *token, int64_t chat_id, const char *text)
 {
     ESP_LOGI(TAG, "Received Telegram command: %s", text);
@@ -203,10 +166,10 @@ static void handle_telegram_message(const char *token, int64_t chat_id, const ch
                 char tts_key_check[192] = {0};
                 if (storage_read_string("openai_key", tts_key_check, sizeof(tts_key_check)) == ESP_OK && strlen(tts_key_check) > 0) {
                     ESP_LOGI(TAG, "Synthesizing text-to-speech...");
-                    esp_err_t tts_err = backend_text_to_speech(NULL, ds_reply, "/spiffs/telegram_tts.wav");
+                    oled_set_state(OLED_STATE_SPEAKING);
+                    esp_err_t tts_err = backend_text_to_speech(NULL, ds_reply);
                     if (tts_err == ESP_OK) {
-                        ESP_LOGI(TAG, "Playing TTS audio...");
-                        telegram_play_tts("/spiffs/telegram_tts.wav");
+                        ESP_LOGI(TAG, "TTS playback finished.");
                         // Restore custom message after speaking animation completes
                         oled_set_custom_message("JARVIS", first_line);
                     } else {
