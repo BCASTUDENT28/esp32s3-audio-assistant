@@ -117,12 +117,15 @@ esp_err_t backend_speech_to_text(const char* api_key, char* out_text, size_t max
         "Content-Disposition: form-data; name=\"file\"; filename=\"record.wav\"\r\n"
         "Content-Type: audio/wav\r\n\r\n", boundary);
 
-    char multipart_footer[256];
+    char multipart_footer[512];
     int footer_len = snprintf(multipart_footer, sizeof(multipart_footer),
         "\r\n--%s\r\n"
         "Content-Disposition: form-data; name=\"model\"\r\n\r\n"
         "whisper-1\r\n"
-        "--%s--\r\n", boundary, boundary);
+        "--%s\r\n"
+        "Content-Disposition: form-data; name=\"language\"\r\n\r\n"
+        "hi\r\n"
+        "--%s--\r\n", boundary, boundary, boundary);
 
     long total_post_len = header_len + file_size + footer_len;
     ESP_LOGI(TAG, "[STT] Total upload payload: %ld bytes", total_post_len);
@@ -295,7 +298,7 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
     home_auto_read_ultrasonic(&dist);
     
     snprintf(sys_prompt, sizeof(sys_prompt), 
-        "You are Jarvis, a smart home voice assistant. Keep responses under 20 words. "
+        "You are Jarvis, a smart home voice assistant. You must ALWAYS reply in HINDI, using Devanagari script. Keep responses under 20 words. "
         "Current sensor data: Temp %.1fC, Humidity %.1f%%, Distance %.1fcm. "
         "You can control devices by including exactly ONE of these tags in your reply: [RELAY_ON], [RELAY_OFF], [SERVO_OPEN], [SERVO_CLOSE].",
         temp, hum, dist);
