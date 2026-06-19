@@ -1,4 +1,4 @@
 # CMakeLists.txt for telegram component
 idf_component_register(SRCS "telegram.c"
                        INCLUDE_DIRS "include"
-                       PRIV_REQUIRES esp_http_client mbedtls json storage ota memory_manager backend_client oled_display audio_io)
+                       PRIV_REQUIRES esp_http_client mbedtls json storage ota memory_manager backend_client oled_display audio_io assistant_common)

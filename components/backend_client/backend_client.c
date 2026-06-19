@@ -159,7 +159,7 @@ esp_err_t backend_speech_to_text(const char* api_key, char* out_text, size_t max
     assistant_register_http_client(client);
 
     // Setup headers
-    char auth_header[256];
+    char auth_header[512];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
     esp_http_client_set_header(client, "Authorization", auth_header);
     
@@ -357,7 +357,7 @@ esp_err_t backend_deepseek_chat(const char* api_key, const char* query, char* ou
     assistant_register_http_client(client);
 
     // Set headers
-    char auth_header[256];
+    char auth_header[512];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
     esp_http_client_set_header(client, "Authorization", auth_header);
     esp_http_client_set_header(client, "Content-Type", "application/json");
@@ -518,7 +518,7 @@ esp_err_t backend_text_to_speech(const char* api_key, const char* text, const ch
     assistant_register_http_client(client);
 
     // Set headers
-    char auth_header[256];
+    char auth_header[512];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", api_key);
     esp_http_client_set_header(client, "Authorization", auth_header);
     esp_http_client_set_header(client, "Content-Type", "application/json");
